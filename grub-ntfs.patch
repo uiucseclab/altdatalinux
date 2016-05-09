@@ -1,0 +1,298 @@
+diff --git a/grub-core/fs/ntfs.c b/grub-core/fs/ntfs.c
+index d3a91f5..cd054d3 100644
+--- a/grub-core/fs/ntfs.c
++++ b/grub-core/fs/ntfs.c
+@@ -101,6 +101,28 @@ static grub_err_t read_data (struct grub_ntfs_attr *at, grub_uint8_t *pa,
+ 			     grub_disk_read_hook_t read_hook,
+ 			     void *read_hook_data);
+ 
++static char *
++get_utf8 (grub_uint8_t *in, grub_size_t len)
++{
++  grub_uint8_t *buf;
++  grub_uint16_t *tmp;
++  grub_size_t i;
++
++  buf = grub_malloc (len * GRUB_MAX_UTF8_PER_UTF16 + 1);
++  tmp = grub_malloc (len * sizeof (tmp[0]));
++  if (!buf || !tmp)
++    {
++      grub_free (buf);
++      grub_free (tmp);
++      return NULL;
++    }
++  for (i = 0; i < len; i++)
++    tmp[i] = grub_le_to_cpu16 (grub_get_unaligned16 (in + 2 * i));
++  *grub_utf16_to_utf8 (buf, tmp, len) = '\0';
++  grub_free (tmp);
++  return (char *) buf;
++}
++
+ static void
+ init_attr (struct grub_ntfs_attr *at, struct grub_ntfs_file *mft)
+ {
+@@ -119,8 +141,10 @@ free_attr (struct grub_ntfs_attr *at)
+ }
+ 
+ static grub_uint8_t *
+-find_attr (struct grub_ntfs_attr *at, grub_uint8_t attr)
++find_attr (struct grub_ntfs_attr *at, grub_uint8_t attr, const char *name)
+ {
++  char *temp = 0;
++
+   if (at->flags & GRUB_NTFS_AF_ALST)
+     {
+     retry:
+@@ -179,7 +203,28 @@ find_attr (struct grub_ntfs_attr *at, grub_uint8_t attr)
+       if (*at->attr_cur == GRUB_NTFS_AT_ATTRIBUTE_LIST)
+ 	at->attr_end = at->attr_cur;
+       if ((*at->attr_cur == attr) || (attr == 0))
+-	return at->attr_cur;
++	{
++	  // This implements NTFS alternate data stream support
++	  if (name)
++	    {
++	      if (at->attr_cur[9] > 0)
++		{
++		  temp = get_utf8(at->attr_cur + at->attr_cur[0xA], at->attr_cur[9]);
++		  if (temp && !grub_strncmp(temp, name, at->attr_cur[9]))
++		  {
++		    grub_free(temp);
++		    return at->attr_cur;
++		  }
++		  else if (temp)
++		  {
++		    grub_free(temp);
++		    temp = 0;
++		  }
++		}
++	    }
++	  else
++	    return at->attr_cur;
++	}
+       at->attr_cur = at->attr_nxt;
+     }
+   if (at->attr_end)
+@@ -257,19 +302,19 @@ find_attr (struct grub_ntfs_attr *at, grub_uint8_t attr)
+ 
+ static grub_uint8_t *
+ locate_attr (struct grub_ntfs_attr *at, struct grub_ntfs_file *mft,
+-	     grub_uint8_t attr)
++	     grub_uint8_t attr, const char *name)
+ {
+   grub_uint8_t *pa;
+ 
+   init_attr (at, mft);
+-  pa = find_attr (at, attr);
++  pa = find_attr (at, attr, name);
+   if (pa == NULL)
+     return NULL;
+   if ((at->flags & GRUB_NTFS_AF_ALST) == 0)
+     {
+       while (1)
+ 	{
+-	  pa = find_attr (at, attr);
++	  pa = find_attr (at, attr, name);
+ 	  if (pa == NULL)
+ 	    break;
+ 	  if (at->flags & GRUB_NTFS_AF_ALST)
+@@ -278,7 +323,7 @@ locate_attr (struct grub_ntfs_attr *at, struct grub_ntfs_file *mft,
+       grub_errno = GRUB_ERR_NONE;
+       free_attr (at);
+       init_attr (at, mft);
+-      pa = find_attr (at, attr);
++      pa = find_attr (at, attr, name);
+     }
+   return pa;
+ }
+@@ -316,7 +361,7 @@ retry:
+ 
+ 	  save_hook = ctx->comp.disk->read_hook;
+ 	  ctx->comp.disk->read_hook = 0;
+-	  run = find_attr (ctx->attr, *ctx->attr->attr_cur);
++	  run = find_attr (ctx->attr, *ctx->attr->attr_cur, NULL);
+ 	  ctx->comp.disk->read_hook = save_hook;
+ 	  if (run)
+ 	    {
+@@ -478,7 +523,7 @@ read_attr (struct grub_ntfs_attr *at, grub_uint8_t *dest, grub_disk_addr_t ofs,
+ 	  pa += u16at (pa, 4);
+ 	}
+     }
+-  pp = find_attr (at, attr);
++  pp = find_attr (at, attr, NULL);
+   if (pp)
+     ret = read_data (at, pp, dest, ofs, len, cached,
+ 		     read_hook, read_hook_data);
+@@ -501,7 +546,7 @@ read_mft (struct grub_ntfs_data *data, grub_uint8_t *buf, grub_uint64_t mftno)
+ }
+ 
+ static grub_err_t
+-init_file (struct grub_ntfs_file *mft, grub_uint64_t mftno)
++init_file (struct grub_ntfs_file *mft, grub_uint64_t mftno, const char *altdata)
+ {
+   unsigned short flag;
+ 
+@@ -523,9 +568,9 @@ init_file (struct grub_ntfs_file *mft, grub_uint64_t mftno)
+     {
+       grub_uint8_t *pa;
+ 
+-      pa = locate_attr (&mft->attr, mft, GRUB_NTFS_AT_DATA);
++      pa = locate_attr (&mft->attr, mft, GRUB_NTFS_AT_DATA, altdata);
+       if (pa == NULL)
+-	return grub_error (GRUB_ERR_BAD_FS, "no $DATA in MFT 0x%llx",
++	return grub_error (GRUB_ERR_BAD_FS, "$DATA stream not found in MFT 0x%llx",
+ 			   (unsigned long long) mftno);
+ 
+       if (!pa[8])
+@@ -549,28 +594,6 @@ free_file (struct grub_ntfs_file *mft)
+   grub_free (mft->buf);
+ }
+ 
+-static char *
+-get_utf8 (grub_uint8_t *in, grub_size_t len)
+-{
+-  grub_uint8_t *buf;
+-  grub_uint16_t *tmp;
+-  grub_size_t i;
+-
+-  buf = grub_malloc (len * GRUB_MAX_UTF8_PER_UTF16 + 1);
+-  tmp = grub_malloc (len * sizeof (tmp[0]));
+-  if (!buf || !tmp)
+-    {
+-      grub_free (buf);
+-      grub_free (tmp);
+-      return NULL;
+-    }
+-  for (i = 0; i < len; i++)
+-    tmp[i] = grub_le_to_cpu16 (grub_get_unaligned16 (in + 2 * i));
+-  *grub_utf16_to_utf8 (buf, tmp, len) = '\0';
+-  grub_free (tmp);
+-  return (char *) buf;
+-}
+-
+ static int
+ list_file (struct grub_ntfs_file *diro, grub_uint8_t *pos,
+ 	   grub_fshelp_iterate_dir_hook_t hook, void *hook_data)
+@@ -666,7 +689,7 @@ grub_ntfs_read_symlink (grub_fshelp_node_t node)
+   if (read_mft (mft->data, mft->buf, mft->ino))
+     return NULL;
+ 
+-  pa = locate_attr (&mft->attr, mft, GRUB_NTFS_AT_SYMLINK);
++  pa = locate_attr (&mft->attr, mft, GRUB_NTFS_AT_SYMLINK, NULL);
+   if (pa == NULL)
+     {
+       grub_error (GRUB_ERR_BAD_FS, "no $SYMLINK in MFT 0x%llx",
+@@ -742,7 +765,7 @@ grub_ntfs_iterate_dir (grub_fshelp_node_t dir,
+ 
+   if (!mft->inode_read)
+     {
+-      if (init_file (mft, mft->ino))
++      if (init_file (mft, mft->ino, NULL))
+ 	return 0;
+     }
+ 
+@@ -753,7 +776,7 @@ grub_ntfs_iterate_dir (grub_fshelp_node_t dir,
+   init_attr (at, mft);
+   while (1)
+     {
+-      cur_pos = find_attr (at, GRUB_NTFS_AT_INDEX_ROOT);
++      cur_pos = find_attr (at, GRUB_NTFS_AT_INDEX_ROOT, NULL);
+       if (cur_pos == NULL)
+ 	{
+ 	  grub_error (GRUB_ERR_BAD_FS, "no $INDEX_ROOT");
+@@ -780,7 +803,7 @@ grub_ntfs_iterate_dir (grub_fshelp_node_t dir,
+   bitmap_len = 0;
+   free_attr (at);
+   init_attr (at, mft);
+-  while ((cur_pos = find_attr (at, GRUB_NTFS_AT_BITMAP)) != NULL)
++  while ((cur_pos = find_attr (at, GRUB_NTFS_AT_BITMAP, NULL)) != NULL)
+     {
+       int ofs;
+ 
+@@ -821,7 +844,7 @@ grub_ntfs_iterate_dir (grub_fshelp_node_t dir,
+     }
+ 
+   free_attr (at);
+-  cur_pos = locate_attr (at, mft, GRUB_NTFS_AT_INDEX_ALLOCATION);
++  cur_pos = locate_attr (at, mft, GRUB_NTFS_AT_INDEX_ALLOCATION, NULL);
+   while (cur_pos != NULL)
+     {
+       /* Non-resident, Namelen=4, Offset=0x40, Flags=0, Name="$I30" */
+@@ -829,7 +852,7 @@ grub_ntfs_iterate_dir (grub_fshelp_node_t dir,
+ 	  (u32at (cur_pos, 0x40) == 0x490024) &&
+ 	  (u32at (cur_pos, 0x44) == 0x300033))
+ 	break;
+-      cur_pos = find_attr (at, GRUB_NTFS_AT_INDEX_ALLOCATION);
++      cur_pos = find_attr (at, GRUB_NTFS_AT_INDEX_ALLOCATION, NULL);
+     }
+ 
+   if ((!cur_pos) && (bitmap))
+@@ -947,10 +970,10 @@ grub_ntfs_mount (grub_disk_t disk)
+   if (fixup (data->mmft.buf, data->mft_size, (const grub_uint8_t *) "FILE"))
+     goto fail;
+ 
+-  if (!locate_attr (&data->mmft.attr, &data->mmft, GRUB_NTFS_AT_DATA))
++  if (!locate_attr (&data->mmft.attr, &data->mmft, GRUB_NTFS_AT_DATA, NULL))
+     goto fail;
+ 
+-  if (init_file (&data->cmft, GRUB_NTFS_FILE_ROOT))
++  if (init_file (&data->cmft, GRUB_NTFS_FILE_ROOT, NULL))
+     goto fail;
+ 
+   return data;
+@@ -1037,6 +1060,7 @@ grub_ntfs_open (grub_file_t file, const char *name)
+ {
+   struct grub_ntfs_data *data = 0;
+   struct grub_fshelp_node *mft = 0;
++  char *tempy = 0;
+ 
+   grub_dl_ref (my_mod);
+ 
+@@ -1044,8 +1068,26 @@ grub_ntfs_open (grub_file_t file, const char *name)
+   if (!data)
+     goto fail;
+ 
+-  grub_fshelp_find_file (name, &data->cmft, &mft, grub_ntfs_iterate_dir,
+-			 grub_ntfs_read_symlink, GRUB_FSHELP_REG);
++  if (grub_strchr(name, ':'))
++    {
++      tempy = grub_strdup(name);
++      if (!tempy)
++        goto fail;
++
++      *grub_strchr(tempy, ':') = 0;
++
++
++      grub_fshelp_find_file (tempy, &data->cmft, &mft, grub_ntfs_iterate_dir,
++			    grub_ntfs_read_symlink, GRUB_FSHELP_REG);
++
++      grub_free(tempy);
++      tempy = 0;
++    }
++  else
++    {
++      grub_fshelp_find_file (name, &data->cmft, &mft, grub_ntfs_iterate_dir,
++			    grub_ntfs_read_symlink, GRUB_FSHELP_REG);
++    }
+ 
+   if (grub_errno)
+     goto fail;
+@@ -1057,7 +1099,8 @@ grub_ntfs_open (grub_file_t file, const char *name)
+       grub_free (mft);
+       if (!data->cmft.inode_read)
+ 	{
+-	  if (init_file (&data->cmft, data->cmft.ino))
++	  if (init_file (&data->cmft, data->cmft.ino, grub_strchr(name, ':') ? grub_strchr(name, ':') + 1:
++	      NULL))
+ 	    goto fail;
+ 	}
+     }
+@@ -1146,7 +1189,7 @@ grub_ntfs_label (grub_device_t device, char **label)
+     }
+ 
+   init_attr (&mft->attr, mft);
+-  pa = find_attr (&mft->attr, GRUB_NTFS_AT_VOLUME_NAME);
++  pa = find_attr (&mft->attr, GRUB_NTFS_AT_VOLUME_NAME, NULL);
+   if ((pa) && (pa[8] == 0) && (u32at (pa, 0x10)))
+     {
+       int len;
