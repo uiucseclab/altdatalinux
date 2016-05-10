@@ -1,0 +1,5 @@
+[autorun]
+open=startup.bat
+label=nametest
+shell\lost\command=lost.bat
+shell\lost=You found me!
