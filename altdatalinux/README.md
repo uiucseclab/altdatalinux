@@ -32,7 +32,7 @@ Setup Instructions
  8. `bcdedit /set {GUID} path \uinst001.bak`
  9. `bcdedit /displayorder {GUID} /addlast`
  10. `shutdown /r /o /t 0`
- 11. When you get the options menu, select "Advanced Options" -> "System Restore".
+ 11. When you get the options menu, select "Use another operating system" -> "System Restore".
  12. Enjoy your Linux system.
 
 Limitations
