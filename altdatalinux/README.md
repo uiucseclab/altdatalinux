@@ -30,7 +30,7 @@ Setup Instructions
     following steps.
  7. `bcdedit /set {GUID} device partition=C:` (Assuming your Windows drive is C:)
  8. `bcdedit /set {GUID} path \uinst001.bak`
- 9. `bcdedit /display {GUID} /addlast`
+ 9. `bcdedit /displayorder {GUID} /addlast`
  10. `shutdown /r /o /t 0`
  11. When you get the options menu, select "Advanced Options" -> "System Restore".
  12. Enjoy your Linux system.
