@@ -40,7 +40,7 @@ Limitations
  - Only works on BIOS systems with MSDOS disklabels. Making it work on EFI/GPT systems should be
    straightforward but I ran out of time.
  - Does not work on Bitlocker-encrypted volumes, for obvious reasons.
- - Assumes your Windows is installed on the second disk partition.
+ - Assumes Windows is installed on the second disk partition.
 
 Demo
 ---
