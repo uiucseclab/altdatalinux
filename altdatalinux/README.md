@@ -13,8 +13,8 @@ Files
    patch and running `./configure && make`. It will create a file named uinst000.bak.
  - uinst001.bak: This is a grub4dos stage1 file. Copy it and the generated uinst000.bak to the root
    of the NTFS filesystem.
- - filesystem.xz: This contains a base Debian 8.1 jessie installation. It must be copied into
-   `\Windows\System32\ntmincore.dll:$SysRestore`.
+ - filesystem.xz: This contains a compressed ext3 filesystem containing a base Debian 8.1 jessie
+   installation. It must be extracted into `\Windows\System32\ntmincore.dll:$SysRestore`.
 
 Setup Instructions
 ---
