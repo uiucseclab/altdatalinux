@@ -1,12 +1,12 @@
 Alt Data Linux
----
+===
 
 This directory contains files to enable a Linux system to be embedded within an alternate data
 stream on a Windows NTFS partition and to enable booting that system through the Windows Boot
 Manager.
 
 Files
-===
+---
  - grub-ntfs.patch: This is patch for GRUB to enable rudimentary support for NTFS alternate data
    streams.
  - make\_grub\_image.sh: Run this script from within the grub source directory after applying the
@@ -17,7 +17,7 @@ Files
    `\Windows\System32\ntmincore.dll:$SysRestore`.
 
 Setup Instructions
-===
+---
  1. You need to mount your NTFS partition on a Linux machine using ntfs-3g with
     `-o streams\_interface=windows`. If you create the alternate data stream from within Windows, it
     structures the filesystem in a way that the GRUB module can't handle. I did not have time to
@@ -36,8 +36,12 @@ Setup Instructions
  12. Enjoy your Linux system.
 
 Limitations
-===
+---
  - Only works on BIOS systems with MSDOS disklabels. Making it work on EFI/GPT systems should be
    straightforward but I ran out of time.
  - Does not work on Bitlocker-encrypted volumes, for obvious reasons.
  - Assumes your Windows is installed on the second disk partition.
+
+Demo
+---
+See [YouTube](https://youtu.be/1LxpyYqTQ_Q) for a demo.
